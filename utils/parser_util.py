@@ -100,9 +100,9 @@ class ModelOptions:
     lambda_fc: float = field(default=0.0,
                              metadata={"help": "Foot contact loss."})
 
-    weight_loss_joint_pos_global: float = field(default=2.0, #100
+    weight_loss_joint_pos_global: float = field(default=2.0, 
                              metadata={"help": "FK loss."})
-    weight_loss_joint_vel_global: float = field(default=10.0, #1000
+    weight_loss_joint_vel_global: float = field(default=10.0, 
                              metadata={"help": "FK loss."})
 
     unconstrained: bool = field(
@@ -162,11 +162,11 @@ class DataOptions:
                             metadata={
                                 "help":
                                 "How to encode scene into diffusion",
-                                "choices": ['height_map', 'occ_map', 'occ_map24']
+                                "choices": ['occ_map24']
                             })
     
     beta: bool = field(default=False, metadata={"help": "Incoporate shape paramters beta."})
-    body_abstract: str = field(default='part_height',
+    body_abstract: str = field(default='part_all',
                          metadata={
                              "help": "Body encoding",
                              "choices":
@@ -243,11 +243,11 @@ class TrainingOptions:
     imputation: str = field(default='early',
                             metadata={
                                 "help":
-                                "How to Imputate over diffusion timesteps",
+                                "Imputation strategy",
                                 "choices": ['all', 'linear', 'early']
                             })
-    imputation_timestep: int = field(default=30,
-                            metadata={"help": "Batch size during training."})
+    imputation_timestep: int = field(default=20,
+                            metadata={"help": "Imputation until this diffusion timestep."})
     #                        
     eval_batch_size: int = field(
         default=32,

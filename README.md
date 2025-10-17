@@ -9,8 +9,41 @@
 
 ![teaser_image](https://inwoohwang.me/SceneMI/static/images/teaser.png)
 
-The code will be released soon.
 
+## :hammer_and_wrench: Setup
+
+```bash
+# Create environment
+conda create -n scenemi python=3.9
+conda activate scenemi
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+## :file_folder: Dataset and Preparation
+
+1. **Download the TRUMANS dataset** and place it under:
+   ```
+   dataset/TRUMANS/Data_release/
+   ```
+
+2. **Download SMPL-X body models** and place them under:
+   ```
+   body_models/smplx/
+   ```
+
+3. **Preprocess the dataset:**
+   ```bash
+   python preprocess_dataset.py
+   ```
+
+## :rocket: Training
+
+To train the diffusion-based SceneMI model:
+```bash
+python -m train.train_diffusion_scenemib
+```
 
 ## :star: Citation
 ```
@@ -24,3 +57,8 @@ The code will be released soon.
     url={https://arxiv.org/abs/2503.16289}, 
 }
 ```
+
+## :handshake: Acknowledgements
+
+We sincerely thank the open-source projects that our code builds upon and draws inspiration from:  
+CondMDI, TRUMANS and MDM.
