@@ -15,6 +15,7 @@ htmlcov
 .envrc
 
 dataset/
+!dataset/trumans_opt.txt
 body_models/
 runs/
 save/

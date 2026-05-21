@@ -1,0 +1,6 @@
+------------ Options -------------
+checkpoints_dir: ./checkpoints
+dataset_name: trumans
+name: SceneMI
+unit_length: 4
+-------------- End ----------------
