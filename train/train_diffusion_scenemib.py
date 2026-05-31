@@ -4,6 +4,9 @@
 import os
 import sys
 import json
+import signal
+import datetime
+import faulthandler
 from pprint import pprint
 from utils.fixseed import fixseed
 from utils.parser_util import train_args
@@ -13,6 +16,34 @@ from data_loaders.get_data import DatasetConfig, get_dataset_loader
 from utils.model_util import create_model_and_diffusion, load_saved_model
 from configs import card
 from torch.utils.tensorboard import SummaryWriter
+
+_SIGNAL_LOG_FILE = None
+_SIGNAL_LOG_FH = None
+
+
+def _install_signal_debug_handler(save_dir: str):
+    global _SIGNAL_LOG_FILE
+    global _SIGNAL_LOG_FH
+
+    os.makedirs(save_dir, exist_ok=True)
+    _SIGNAL_LOG_FILE = os.path.join(save_dir, "signal_debug.log")
+    _SIGNAL_LOG_FH = open(_SIGNAL_LOG_FILE, "a", buffering=1)
+
+    def _usr2_handler(signum, frame):
+        now = datetime.datetime.now().isoformat()
+        msg = (
+            f"\n[{now}] Received signal={signum} ({signal.Signals(signum).name}), "
+            f"pid={os.getpid()}, ppid={os.getppid()}\n"
+            f"Dumping all thread tracebacks to {_SIGNAL_LOG_FILE}\n"
+        )
+        print(msg, file=sys.stderr, flush=True)
+        _SIGNAL_LOG_FH.write(msg)
+        _SIGNAL_LOG_FH.flush()
+        faulthandler.dump_traceback(file=_SIGNAL_LOG_FH, all_threads=True)
+        _SIGNAL_LOG_FH.flush()
+
+    signal.signal(signal.SIGUSR2, _usr2_handler)
+
 
 def list_of_floats(arg):
     return list(map(float, arg.split(',')))
@@ -32,6 +63,7 @@ def main():
     
     writer = SummaryWriter(os.path.join("runs/diffusion", model_info))
     args.save_dir = os.path.join("save", model_info)
+    _install_signal_debug_handler(args.save_dir)
     pprint(args.__dict__)
     fixseed(args.seed)
 

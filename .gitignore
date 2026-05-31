@@ -20,3 +20,6 @@ body_models/
 runs/
 save/
 smplx_model/
+
+.pdf
+.log

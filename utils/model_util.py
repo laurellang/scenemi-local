@@ -76,7 +76,8 @@ def get_model_args(args: FullModelOptions, data: DataLoader):
         elif data_rep == "smpl_loc":
             njoints = 135 + 63 + 4
         elif data_rep == "smpl_glo":
-            njoints = 135 + 66
+            # Current TRUMANS preprocessing provides transl(3) + orient6d(6) + body_pose_6d(126) = 135.
+            njoints = 135
         elif data_rep == "smpl_loc_glo":
             njoints = 135 + 63 + 4 + 66
         elif data_rep == "loc":

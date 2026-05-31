@@ -5,6 +5,7 @@ import os
 from os.path import join as pjoin
 import random
 import pickle
+import glob
 from tqdm import tqdm
 
 from torch.utils.data._utils.collate import default_collate
@@ -113,8 +114,9 @@ class SceneMotionDataset(data.Dataset):
         transl = motion_dict['transl']
         orient_6d = motion_dict['global_orient_6d']
         body_pose_6d = motion_dict['body_pose_6d'][:, self.sub_6d_idx]
-        joints_flat = motion_dict['global_joints'][:, :22, :].reshape(motion_dict['global_joints'].shape[0], -1)
-        return torch.cat([transl, orient_6d, body_pose_6d, joints_flat.detach().cpu()], dim=-1)
+        # Keep motion representation consistent with n_joints=135:
+        # transl(3) + global_orient_6d(6) + body_pose_6d(21*6=126).
+        return torch.cat([transl, orient_6d, body_pose_6d], dim=-1)
     
     def __len__(self):
         return len(self.id_list)
@@ -134,8 +136,8 @@ class SceneMotionDataset(data.Dataset):
         # Betas and body abstract
         betas = gt_motion.get('betas', [[[0.]]])[0]
         body_abstract = np.array([gt_motion.get('part_height', [[0.]])])
-        betas_tensor = betas.clone().detach()
-        body_abstract_tensor = torch.tensor(body_abstract)
+        betas_tensor = torch.from_numpy(np.array(betas)).float()
+        body_abstract_tensor = torch.from_numpy(np.array(body_abstract)).float()
 
         # BPS data
         bps_file = f'bps_marker_sbj_{noise_level}.npy' if self.light_bps else f'bps_sbj_{noise_level}.npy'
@@ -145,7 +147,7 @@ class SceneMotionDataset(data.Dataset):
 
         # Ground truth joints
         gt_joints = gt_motion.get('global_joints', [[[0.]]])
-        gt_joints_tensor = gt_joints[:self.max_motion_length].detach().cpu()
+        gt_joints_tensor = torch.from_numpy(np.array(gt_joints[:self.max_motion_length])).float()
         
         gt_motion_tensor = self._get_motion_tensor(gt_motion)[:self.max_motion_length]
         input_motion_tensor = self._get_motion_tensor(input_motion)[:self.max_motion_length]
@@ -161,8 +163,12 @@ class SceneMotionDataset(data.Dataset):
         bps_sbj_norm = (bps_sbj - self.bps_sbj_mean) / self.bps_sbj_std
 
         # --- 3. Load and Process Scene Data ---
-        occ_map_data = np.load(os.path.join(scene_name, 'occ_scene.npz'))
-        occ_map = torch.tensor(occ_map_data['occ_scene'])
+        occ_scene_path = os.path.join(scene_name, 'occ_scene.npz')
+        if os.path.exists(occ_scene_path):
+            occ_map_data = np.load(occ_scene_path)
+            occ_map = torch.tensor(occ_map_data['occ_scene'])
+        else:
+            occ_map = torch.zeros((self.scene_size, self.scene_size, self.scene_size), dtype=torch.float32)
 
         if not self.not_scene_scale:
             occ_map = occ_map * 2.0 - 1.0
@@ -206,8 +212,8 @@ class TRUMANS(data.Dataset):
         #scene_preprocess_folder = 'preprocess_trumans'   
         #data_preprocess_folder = 'preprocess_trumans'  # SET YOUR PREPROCESS FOLDER HERE
 
-        scene_preprocess_folder = 'preprocess_scene'
-        data_preprocess_folder = 'preprocess_120_dynaFalse_noiseSynthetic_startendTrue_betaTrue'
+        scene_preprocess_folder = 'preprocess_120_betaFalse'
+        data_preprocess_folder = 'preprocess_120_betaFalse'
 
 
         self.mode = split
@@ -230,26 +236,25 @@ class TRUMANS(data.Dataset):
 
         self.num_frames = num_frames
 
-        abs_base_path = '.'
-        dataset_opt_path = pjoin(abs_base_path, datapath)
+        project_base_path = '.'
+        dataset_opt_path = pjoin(project_base_path, datapath)
         device = None  # torch.device('cuda:4') # This param is not in use in this context
         # TODO: modernize get_opt
         opt = get_opt(dataset_opt_path, device, split, max_motion_length=num_frames)
-        opt.meta_dir = pjoin(abs_base_path, opt.meta_dir)
-        opt.motion_dir = pjoin(abs_base_path, opt.motion_dir)
-        opt.text_dir = pjoin(abs_base_path, opt.text_dir)
-        opt.model_dir = pjoin(abs_base_path, opt.model_dir)
-        opt.checkpoints_dir = pjoin(abs_base_path, opt.checkpoints_dir)
-        opt.data_root = pjoin(abs_base_path, opt.data_root)
-        opt.save_root = pjoin(abs_base_path, opt.save_root)
-        opt.meta_dir = './dataset'
+        # get_opt already handles TRUMANS_DATA_ROOT for opt.data_root and opt.motion_dir
+        opt.meta_dir = pjoin(project_base_path, opt.meta_dir)
+        opt.text_dir = pjoin(project_base_path, opt.text_dir)
+        opt.model_dir = pjoin(project_base_path, opt.model_dir)
+        opt.checkpoints_dir = pjoin(project_base_path, opt.checkpoints_dir)
+        opt.save_root = pjoin(project_base_path, opt.save_root)
+        opt.meta_dir = os.environ.get('TRUMANS_META_DIR', './dataset')
         self.opt = opt
 
         print('Loading dataset %s ...' % opt.dataset_name)
         print("mode = ", split)
 
-
-        assert self.num_frames == 120
+        print(f"DEBUG: num_frames = {self.num_frames}") 
+        #assert self.num_frames == 120
 
         self.split_file = pjoin(opt.data_root, f"{split}_{self.num_frames}.txt")
         
@@ -265,7 +270,7 @@ class TRUMANS(data.Dataset):
             self.rel_verts_idx_list = torch.load(rel_verts_idx_path).int().tolist()
 
         
-        additional_info_folder = 'scene_info'
+        additional_info_folder = 'preprocess_120_betaFalse'
 
         print("load data from here: ", self.split_file)
         print('Loading data preprocess folder %s ...' % data_preprocess_folder)
@@ -273,20 +278,60 @@ class TRUMANS(data.Dataset):
         id_list = []
         scene_list = []
         add_info_list = []
+        fallback_records = []
 
         print(f'Loading dataset {split} from {self.split_file}...')
         with open(self.split_file, "r") as f:
             for line in f.readlines():
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split("/", 2)
+                if len(parts) < 3:
+                    # Skip malformed lines in split files instead of crashing.
+                    continue
+                rel_id = parts[2]
+
+                scene_path = pjoin(opt.data_root, scene_preprocess_folder, rel_id)
+                add_info_path = pjoin(opt.data_root, additional_info_folder, rel_id, 'scene_info.pickle')
+                id_path = pjoin(opt.data_root, data_preprocess_folder, rel_id)
+                fallback_records.append((scene_path, add_info_path, id_path))
+
                 if self.scene_enc == 'occ_map24':
-                    scene_info_path = pjoin(opt.data_root, additional_info_folder , line.strip().split("/",2)[2], 'scene_info.pickle')
+                    scene_info_path = pjoin(opt.data_root, additional_info_folder, rel_id, 'scene_info.pickle')
                     with open(scene_info_path, 'rb') as fr:
                         verts_min_max_xz = pickle.load(fr)['verts_min_max_xz']
                     if not np.all((verts_min_max_xz >= -2.4) & (verts_min_max_xz <= 2.4)):
                         continue
                 
-                scene_list.append(pjoin(opt.data_root, scene_preprocess_folder, line.strip().split("/",2)[2]))
-                add_info_list.append(pjoin(opt.data_root, additional_info_folder , line.strip().split("/",2)[2], 'scene_info.pickle'))
-                id_list.append(pjoin(opt.data_root, data_preprocess_folder, line.strip().split("/",2)[2]))
+                scene_list.append(scene_path)
+                add_info_list.append(add_info_path)
+                id_list.append(id_path)
+
+        if len(id_list) == 0 and len(fallback_records) > 0:
+            print("WARNING: scene filter removed all samples, fallback to unfiltered split list.")
+            for scene_path, add_info_path, id_path in fallback_records:
+                scene_list.append(scene_path)
+                add_info_list.append(add_info_path)
+                id_list.append(id_path)
+
+        if len(id_list) == 0:
+            print("WARNING: no samples parsed from split file, fallback to scanning preprocess directories.")
+            pattern = pjoin(opt.data_root, data_preprocess_folder, "*", "*")
+            discovered = sorted(glob.glob(pattern))
+            print(f"DEBUG fallback pattern: {pattern}")
+            print(f"DEBUG discovered candidate dirs: {len(discovered)}")
+            for id_path in discovered:
+                if not os.path.isfile(pjoin(id_path, "body_parms_cano_gt.pickle")):
+                    continue
+                rel_id = os.path.relpath(id_path, pjoin(opt.data_root, data_preprocess_folder))
+                scene_path = pjoin(opt.data_root, scene_preprocess_folder, rel_id)
+                add_info_path = pjoin(opt.data_root, additional_info_folder, rel_id, 'scene_info.pickle')
+                scene_list.append(scene_path)
+                add_info_list.append(add_info_path)
+                id_list.append(id_path)
+
+        print(f"Loaded {len(id_list)} valid samples from split {self.split_file}")
 
         mean_path = pjoin(opt.meta_dir, 'z_norm', f'{opt.dataset_name}_{self.data_rep}_mean.pt')
         std_path = pjoin(opt.meta_dir, 'z_norm', f'{opt.dataset_name}_{self.data_rep}_std.pt')
@@ -347,22 +392,27 @@ class TRUMANS(data.Dataset):
         return self.scene_dataset.__len__()
     
     def _get_motion_stats(self, id_list):
+        if len(id_list) == 0:
+            raise RuntimeError(f"No valid samples found for motion stats. Check split/data path: {self.split_file}")
         motion_list = []
         for name in tqdm(id_list, desc="Calculating Motion Stats"):
             motion_dict = np.load(pjoin(name, 'body_parms_cano_gt.pickle'), allow_pickle=True)
             transl = motion_dict['transl']
             orient_6d = motion_dict.get('global_orient_6d', aa2sixd(motion_dict['global_orient']))
             body_pose_6d = motion_dict['body_pose_6d'][:, self.sub_6d_idx]
-            joints_flat = motion_dict['global_joints'][:, :22, :].reshape(motion_dict['global_joints'].shape[0], -1)
-            
-            combined_data = np.concatenate([transl, orient_6d, body_pose_6d, joints_flat], axis=-1)
+
+            combined_data = np.concatenate([transl, orient_6d, body_pose_6d], axis=-1)
             motion_list.append(torch.from_numpy(combined_data).float())
 
+        if len(motion_list) == 0:
+            raise RuntimeError(f"No motion tensors collected from {len(id_list)} ids. Please verify preprocess files.")
         all_motions = torch.cat(motion_list, dim=0)
         mean, std = torch.std_mean(all_motions, dim=0)
         return mean, std
 
     def _get_bps_stats(self, id_list):
+        if len(id_list) == 0:
+            raise RuntimeError(f"No valid samples found for BPS stats. Check split/data path: {self.split_file}")
         bps_list = []
         for name in tqdm(id_list, desc="Calculating BPS Stats"):
             bps_file = 'bps_marker_sbj_0.0.npy' if self.light_bps else 'bps_sbj_0.0.npy'
@@ -372,6 +422,8 @@ class TRUMANS(data.Dataset):
         if self.trunc_bps > 0.0:
             bps_list = [bps / bps.norm(dim=2, keepdim=True).clamp(min=self.trunc_bps) for bps in bps_list]
 
+        if len(bps_list) == 0:
+            raise RuntimeError(f"No BPS tensors collected from {len(id_list)} ids. Please verify preprocess files.")
         all_bps = torch.cat(bps_list, dim=0)
         bps_sbj_std, bps_sbj_mean = torch.std_mean(all_bps.reshape(-1, 3), dim=0)
         return bps_sbj_mean, bps_sbj_std

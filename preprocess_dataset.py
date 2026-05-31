@@ -24,7 +24,7 @@ from scipy.spatial.transform import Rotation
 from common.quaternion import *
 from common.utils import point2point_signed
 
-from utils_transform import *
+from utils.utils_transform import *
 
 
 def fixseed(seed):
@@ -34,7 +34,7 @@ def fixseed(seed):
     torch.manual_seed(seed)
 
 device = "cpu"
-base_dir = 'Data_release' # set your TRUMANS origin data here
+base_dir = os.environ.get('TRUMANS_DATA_ROOT', 'Data_release')  # set via env or defaults to local Data_release
 
 fps = 30
 motion_len = 121
@@ -63,7 +63,7 @@ uniform_verts_idx = []
 all_verts_idx = []
 
 
-sbj_m_bs = smplx.create(model_path="./body_models/",
+sbj_m_bs = smplx.create(model_path=os.environ.get('BODY_MODELS_PATH', './body_models/'),
                 model_type='smplx',
                 gender="neutral",
                 use_pca=False,
@@ -78,7 +78,7 @@ if os.path.exists(verts_id_path):
 
 else:
     print("get downsample verts id")
-    sbj_m_single = smplx.create(model_path="./body_models/",
+    sbj_m_single = smplx.create(model_path=os.environ.get('BODY_MODELS_PATH', './body_models/'),
                 model_type='smplx',
                 gender="neutral",
                 use_pca=False,
@@ -105,7 +105,7 @@ else:
         torch.save(torch.tensor(uniform_verts_idx), f)
 
 
-sbj_m_single = smplx.create(model_path="./body_models/",
+sbj_m_single = smplx.create(model_path=os.environ.get('BODY_MODELS_PATH', './body_models/'),
                 model_type='smplx',
                 gender="neutral",
                 use_pca=False,
@@ -246,7 +246,7 @@ def main(args):
     scene_flag = np.load(pjoin(base_dir, 'scene_flag.npy'))
     object_list = np.load(pjoin(base_dir, 'object_list.npy'))
     object_flag = np.load(pjoin(base_dir, 'object_flag.npy'))
-    object_mat = np.load(pjoin(base_dir, 'object_mat-001.npy'))
+    object_mat = np.load(pjoin(base_dir, 'object_mat.npy'))
 
     meta = np.load(pjoin(base_dir, 'meta.npy'), allow_pickle=True)
     joint_id = meta.item()['joints_ind']
@@ -410,6 +410,18 @@ def main(args):
                     save_dir = pjoin(seg_preprocess_folder, "{}".format(_seg_idx[0]))
                     os.makedirs(save_dir, exist_ok=True)
 
+                    # --- Incremental: skip samples already fully processed ---
+                    required = ['body_parms_gt.pickle', 'scene_info.pickle',
+                                'body_parms_cano_gt.pickle']
+                    if args.occ_scene:
+                        required.append('occ_scene.npz')
+                    for nl in noise_levels:
+                        required.append(f'body_parms_cano_noisy_{nl}.pickle')
+                        required.append(f'bps_sbj_{nl}.npy')
+                    if all(os.path.exists(pjoin(save_dir, f)) for f in required):
+                        print(f"[skip] {save_dir}", flush=True)
+                        continue
+
                     object_list = object_list_origin.copy()
                     for _idx in range(len(object_list)):
                         object_list[_idx].apply_transform(object_transformations[_idx][split_local_seg_idx[_seg_num][0]])
@@ -453,8 +465,9 @@ def main(args):
                     
                     
 
-                    with open(pjoin(save_dir, 'body_parms_gt.pickle'),'wb') as fw:
-                        pickle.dump(body_params_gt, fw)
+                    if not os.path.exists(pjoin(save_dir, 'body_parms_gt.pickle')):
+                        with open(pjoin(save_dir, 'body_parms_gt.pickle'),'wb') as fw:
+                            pickle.dump(body_params_gt, fw)
 
                     body_params_cano, scene_cano, scene_cano_pcd, scene_offset, scene_rotmat, verts_min_max_xz = canonicalized(body_params_gt, scene_mesh, torch.tensor(np.asarray(scene_pcd.points)))
                     scene_info = {'scene_offset': torch.tensor(scene_offset),
@@ -463,8 +476,9 @@ def main(args):
                                 'seg_idx': _seg_idx,
                                 'verts_min_max_xz': verts_min_max_xz}
 
-                    with open(pjoin(save_dir, 'scene_info.pickle'),'wb') as fw:
-                        pickle.dump(scene_info , fw)
+                    if not os.path.exists(pjoin(save_dir, 'scene_info.pickle')):
+                        with open(pjoin(save_dir, 'scene_info.pickle'),'wb') as fw:
+                            pickle.dump(scene_info , fw)
 
                     if save_scene:
                         scene_cano.export(pjoin(save_dir, "scene_cano.obj"))
@@ -472,7 +486,7 @@ def main(args):
                         pcd.points = o3d.utility.Vector3dVector(np.array(scene_cano_pcd).reshape(-1,3))
                         o3d.io.write_point_cloud(str(pjoin(save_dir, "scene_cano.pcd")), pcd)
 
-                    if args.occ_scene:
+                    if args.occ_scene and not os.path.exists(pjoin(save_dir, 'occ_scene.npz')):
                         _, points_dist = point2point_signed(points.float(), scene_cano_pcd.unsqueeze(0).cuda())
                         dist_threshold = (2. * grid_max_y / grid_res_y) / 2.
                         is_occupied = torch.norm(points_dist, dim=2)[0] < dist_threshold
@@ -481,21 +495,29 @@ def main(args):
                         #np.save(pjoin(save_dir, 'occ_scene.npy'), points_sign.detach().cpu().numpy())
                         np.savez(pjoin(save_dir, 'occ_scene.npz'), occ_scene=points_sign.detach().cpu().numpy())
 
-                    with open(pjoin(save_dir, 'body_parms_cano_gt.pickle'),'wb') as fw:
-                        pickle.dump(body_params_cano, fw)
+                    if not os.path.exists(pjoin(save_dir, 'body_parms_cano_gt.pickle')):
+                        with open(pjoin(save_dir, 'body_parms_cano_gt.pickle'),'wb') as fw:
+                            pickle.dump(body_params_cano, fw)
 
                     for noise_level in noise_levels:
+                        noisy_pkl = pjoin(save_dir, 'body_parms_cano_noisy_{}.pickle'.format(noise_level))
+                        bps_npy = pjoin(save_dir, 'bps_sbj_{}.npy'.format(noise_level))
+                        if os.path.exists(noisy_pkl) and os.path.exists(bps_npy):
+                            continue
+
                         body_params_cano_noisy = add_synthetic_noise(body_params_cano, noise_level=noise_level)
-                        with open(pjoin(save_dir, 'body_parms_cano_noisy_{}.pickle'.format(noise_level)),'wb') as fw:
-                            pickle.dump(body_params_cano_noisy, fw)
+                        if not os.path.exists(noisy_pkl):
+                            with open(noisy_pkl,'wb') as fw:
+                                pickle.dump(body_params_cano_noisy, fw)
 
-                        verts = torch.tensor(np.asarray(scene_mesh.vertices), device = 'cuda').unsqueeze(0)
-                        faces = torch.tensor(np.asarray(scene_mesh.faces), device = 'cuda')
+                        if not os.path.exists(bps_npy):
+                            verts = torch.tensor(np.asarray(scene_mesh.vertices), device = 'cuda').unsqueeze(0)
+                            faces = torch.tensor(np.asarray(scene_mesh.faces), device = 'cuda')
 
-                        sbj_verts = sbj_m_bs(**body_params_cano_noisy).vertices[:, uniform_verts_idx]
-                        _, bps_sbj = point2point_signed(sbj_verts.reshape(1,-1,3).cuda(), verts.float())
-                        bps_sbj = bps_sbj.reshape(sbj_verts.shape)
-                        np.save(pjoin(save_dir, 'bps_sbj_{}.npy'.format(noise_level)), bps_sbj.detach().cpu().numpy())
+                            sbj_verts = sbj_m_bs(**body_params_cano_noisy).vertices[:, uniform_verts_idx]
+                            _, bps_sbj = point2point_signed(sbj_verts.reshape(1,-1,3).cuda(), verts.float())
+                            bps_sbj = bps_sbj.reshape(sbj_verts.shape)
+                            np.save(bps_npy, bps_sbj.detach().cpu().numpy())
 
 
 if __name__ == "__main__":

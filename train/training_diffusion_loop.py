@@ -126,6 +126,7 @@ class TrainLoop:
         
         self.use_ddp = False
         self.ddp_model = self.model
+        self._skip_step = False
 
 
     def _load_and_sync_parameters(self):
@@ -260,7 +261,12 @@ class TrainLoop:
 
 
     def run_step(self, batch, cond):
+        self._skip_step = False
         self.forward_backward(batch, cond)
+        if self._skip_step:
+            logger.logkv("skipped_step", 1)
+            self.log_step()
+            return
 
         # optimizer step
         if self.use_fp16:
@@ -274,6 +280,14 @@ class TrainLoop:
             grad_norm, param_norm = compute_norms(self.model.parameters())
             logger.logkv('param_norm', param_norm)
             logger.logkv('grad_norm', grad_norm)
+
+            if (not np.isfinite(grad_norm)) or (not np.isfinite(param_norm)):
+                print(
+                    f"[WARN] Non-finite norm at step {self.step + self.resume_step}. "
+                    "Skipping optimizer update for this batch.")
+                self.opt.zero_grad(set_to_none=True)
+                self.log_step()
+                return
 
             self.scaler.step(self.opt)
             self.scaler.update()
@@ -335,6 +349,14 @@ class TrainLoop:
                         t, losses["loss"].detach())
 
                 loss = (losses["loss"] * weights).mean()
+
+            if not torch.isfinite(loss):
+                print(
+                    f"[WARN] Non-finite loss at step {self.step + self.resume_step}. "
+                    "Skipping this batch.")
+                logger.logkv("bad_loss", 1)
+                self._skip_step = True
+                return
 
             log_loss_dict(self.diffusion, t,
                           {k: v * weights
