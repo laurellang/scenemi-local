@@ -1,0 +1,17 @@
+{
+  "task": "c_shape_traverse_right_bottom_to_right_top",
+  "checkpoint": "/home_shared/xingyu/scenemi-local/save/diffusion_scenemib/model000250000.pt",
+  "split": "val",
+  "sample_index": 0,
+  "start_xz": [
+    3.15,
+    0.85
+  ],
+  "target_xz": [
+    3.15,
+    3.15
+  ],
+  "note": "this ckpt was trained with wo_scene_feature=true, so occ may not influence trajectory",
+  "xml": "/home_shared/xingyu/scenemi-local/demo_outputs/c_traverse/synthetic_scene/c_scene.xml",
+  "occ_npz": "/home_shared/xingyu/scenemi-local/demo_outputs/c_traverse/synthetic_scene/occ_scene.npz"
+}

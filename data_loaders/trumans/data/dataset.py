@@ -170,9 +170,9 @@ class SceneMotionDataset(data.Dataset):
         else:
             occ_map = torch.zeros((self.scene_size, self.scene_size, self.scene_size), dtype=torch.float32)
 
+        occ_map = self._normalize_occ_map_shape(occ_map, scene_name)
         if not self.not_scene_scale:
             occ_map = occ_map * 2.0 - 1.0
-        occ_map = occ_map.permute(1, 0, 2)
 
         # --- 4. Load Scene Info and Return ---
         scene_info = np.load(os.path.join(scene_name, 'scene_info.pickle'), allow_pickle=True)
@@ -188,6 +188,39 @@ class SceneMotionDataset(data.Dataset):
             scene_info,
             betas_tensor,
             body_abstract_tensor,
+        )
+
+    def _normalize_occ_map_shape(self, occ_map: torch.Tensor, scene_name: str) -> torch.Tensor:
+        """
+        Normalize occupancy map to [24, scene_size, scene_size].
+        Accepted raw layouts:
+          1) [scene_size, 24, scene_size]   (x, y, z)      -> permute to [24, x, z]
+          2) [24, scene_size, scene_size]   (already model layout)
+          3) [scene_size, scene_size, scene_size] (legacy y=48) -> max-pool y to 24 then permute
+        """
+        occ_map = occ_map.float()
+        if occ_map.ndim != 3:
+            raise RuntimeError(f"Invalid occ_map ndim={occ_map.ndim} for scene: {scene_name}")
+
+        sx = self.scene_size
+
+        # Case A: canonical raw layout [x, 24, z]
+        if occ_map.shape == (sx, 24, sx):
+            return occ_map.permute(1, 0, 2).contiguous()
+
+        # Case B: already model layout [24, x, z]
+        if occ_map.shape == (24, sx, sx):
+            return occ_map.contiguous()
+
+        # Case C: legacy full cube [x, y=48, z] -> y downsample to 24
+        if occ_map.shape == (sx, sx, sx):
+            # Downsample the middle axis by 2 via max pooling (keep occupied voxels).
+            occ_map = occ_map.reshape(sx, 24, 2, sx).amax(dim=2)
+            return occ_map.permute(1, 0, 2).contiguous()
+
+        raise RuntimeError(
+            f"Unsupported occ_map shape {tuple(occ_map.shape)} for scene: {scene_name}; "
+            f"expected one of ({sx},24,{sx}), (24,{sx},{sx}), ({sx},{sx},{sx})"
         )
 
 class TRUMANS(data.Dataset):
@@ -257,6 +290,12 @@ class TRUMANS(data.Dataset):
         #assert self.num_frames == 120
 
         self.split_file = pjoin(opt.data_root, f"{split}_{self.num_frames}.txt")
+        if not os.path.exists(self.split_file):
+            env_root = os.environ.get("TRUMANS_DATA_ROOT", None)
+            if env_root is not None:
+                alt_split = pjoin(env_root, f"{split}_{self.num_frames}.txt")
+                if os.path.exists(alt_split):
+                    self.split_file = alt_split
         
         #for real world data testing
         self.remove_endeffector_pose = remove_endeffector_pose
@@ -267,6 +306,9 @@ class TRUMANS(data.Dataset):
         self.rel_verts_idx_list = None
         if self.sub_bps > 0:
             rel_verts_idx_path = pjoin(opt.data_root, 'smplx_verts_id_uniform_ds_rel_{}.pt'.format(self.sub_bps))
+            if not os.path.exists(rel_verts_idx_path):
+                # Fallback to repository root for setups that do not keep this file under dataset/TRUMANS.
+                rel_verts_idx_path = pjoin('.', 'smplx_verts_id_uniform_ds_rel_{}.pt'.format(self.sub_bps))
             self.rel_verts_idx_list = torch.load(rel_verts_idx_path).int().tolist()
 
         

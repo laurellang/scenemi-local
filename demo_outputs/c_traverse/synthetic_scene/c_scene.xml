@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<scene name="C_shape"><meta unit="meter" /><walls><box name="top" xmin="0.6" xmax="3.2" ymin="0.0" ymax="1.8" zmin="2.9" zmax="3.4" /><box name="left" xmin="0.6" xmax="1.1" ymin="0.0" ymax="1.8" zmin="0.6" zmax="3.4" /><box name="bottom" xmin="0.6" xmax="3.2" ymin="0.0" ymax="1.8" zmin="0.6" zmax="1.1" /></walls></scene>

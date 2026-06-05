@@ -286,6 +286,9 @@ class TrainLoop:
                     f"[WARN] Non-finite norm at step {self.step + self.resume_step}. "
                     "Skipping optimizer update for this batch.")
                 self.opt.zero_grad(set_to_none=True)
+                # We already called scaler.unscale_() above; call update() to
+                # reset GradScaler per-optimizer stage before the next step.
+                self.scaler.update()
                 self.log_step()
                 return
 

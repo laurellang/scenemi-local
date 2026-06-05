@@ -1,0 +1,9 @@
+{
+  "task": "scene_aware_motion_inbetweening",
+  "split": "val",
+  "sample_index": 0,
+  "keyframe_interval": 30,
+  "checkpoint": "/home_shared/xingyu/scenemi-local/save/diffusion_scenemib/model000250000.pt",
+  "scene_name": "/home/dataset/xingyu/trumans/Data_release/preprocess_120_betaFalse/2023-02-11@21-01-37_augment1/1530695",
+  "noise_level": 0.0
+}

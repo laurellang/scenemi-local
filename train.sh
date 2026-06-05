@@ -13,12 +13,13 @@ export BODY_MODELS_PATH=./body_models/    # SMPL-X model path (keep in project d
 python -m train.train_diffusion_scenemib \
     --device 0 \
     --arch unet \
-    --wo_scene_feature \
+    --no_wo_frame_feature \
     --data_rep smpl \
-    --weight_loss_joint_pos_global 0 \
-    --weight_loss_joint_vel_global 0 \
     --batch_size 32 \
     --num_steps 1200000 \
+    --lr 1e-4 \
+    --lr_anneal_steps 500000 \
+    --grad_clip 1.0 \
     --save_interval 50000 \
     --log_interval 500 \
     --seed 10

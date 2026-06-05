@@ -642,7 +642,8 @@ class MDM_Scene_UNET(nn.Module):
         
         #self.masked_attention = False
         #if self.masked_attention:
-        self.single_mask = torch.ones((1, 1), dtype=torch.bool).to('cuda')
+        mask_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.single_mask = torch.ones((1, 1), dtype=torch.bool, device=mask_device)
 
         self.train_keypoint_mask = train_keypoint_mask
 
@@ -817,7 +818,8 @@ class MDM_Scene_UNET(nn.Module):
     def mask_weight(self, imputation):
         t1 = self.imputation_timestep
         step = 1000
-        time_weight = torch.ones((step,1,1,1)).float().cuda()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        time_weight = torch.ones((step,1,1,1), device=device).float()
 
         if imputation == "all":
             return time_weight

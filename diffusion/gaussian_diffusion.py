@@ -169,6 +169,7 @@ class GaussianDiffusion:
     """
     def __init__(self, conf: DiffusionConfig):
         self.conf = conf
+        self.compute_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # TODO: to removed and use only self.conf
         self.model_mean_type = conf.model_mean_type
@@ -186,7 +187,9 @@ class GaussianDiffusion:
         self.light_bps = conf.light_bps
 
         if self.remove_endeffector_pose:
-            self.zero_sixd = torch.zeros(self.bs, self.nframes, 12).float().cuda().detach()
+            self.zero_sixd = torch.zeros(
+                self.bs, self.nframes, 12, device=self.compute_device
+            ).float().detach()
 
         self.repr_dim_info()
 
@@ -261,7 +264,7 @@ class GaussianDiffusion:
         self.l2_loss = lambda a, b: (
             a - b
         )**2  # th.nn.MSELoss(reduction='none')  # must be None for handling mask later on.
-        self.mse_loss = nn.MSELoss(reduction='none').to('cuda')
+        self.mse_loss = nn.MSELoss(reduction='none').to(self.compute_device)
 
         self.data_transform_fn = None
         self.data_inv_transform_fn = None
@@ -287,7 +290,7 @@ class GaussianDiffusion:
                 num_betas=10,
                 flat_hand_mean=True,
                 batch_size=self.nframes * self.bs,
-                ).to('cuda').eval()
+                ).to(self.compute_device).eval()
 
 
     def repr_dim_info(self,):
@@ -2129,11 +2132,19 @@ class GaussianDiffusion:
 
 
                     joint_pos_rec_from_smpl = smplx_output.joints[:,0:22].reshape(self.bs,-1,22,3)
+                    # Align temporal lengths defensively in case malformed samples carry shorter gt_joints.
+                    t_min = min(joint_pos_rec_from_smpl.shape[1], joint_pos_clean.shape[1])
+                    joint_pos_rec_from_smpl = joint_pos_rec_from_smpl[:, :t_min]
+                    joint_pos_clean_smpl = joint_pos_clean[:, :t_min]
                     joint_vel_rec_from_smpl = joint_pos_rec_from_smpl[:, 1:] - joint_pos_rec_from_smpl[:, 0:-1]
+                    joint_vel_clean_smpl = joint_pos_clean_smpl[:, 1:] - joint_pos_clean_smpl[:, 0:-1]
                     #joint_acc_rec_from_smpl = joint_vel_rec_from_smpl[:, 1:] - joint_vel_rec_from_smpl[:, 0:-1]
 
-                    terms["joint_pos_global_from_smpl"] = self.mse_loss(joint_pos_rec_from_smpl, joint_pos_clean).mean()
-                    terms['joint_vel_global_from_smpl'] = self.mse_loss(joint_vel_rec_from_smpl, joint_vel_clean).mean()
+                    terms["joint_pos_global_from_smpl"] = self.mse_loss(joint_pos_rec_from_smpl, joint_pos_clean_smpl).mean()
+                    if joint_vel_rec_from_smpl.shape[1] > 0 and joint_vel_clean_smpl.shape[1] > 0:
+                        terms['joint_vel_global_from_smpl'] = self.mse_loss(joint_vel_rec_from_smpl, joint_vel_clean_smpl).mean()
+                    else:
+                        terms['joint_vel_global_from_smpl'] = torch.zeros((), device=joint_pos_rec_from_smpl.device)
                     #terms['joint_smooth_from_smpl'] = torch.mean(joint_acc_rec_from_smpl ** 2)
                 
                 if 'loc' in self.data_rep:
@@ -2156,18 +2167,32 @@ class GaussianDiffusion:
                     positions[..., 2] += r_pos[..., 2:3]
 
                     joint_pos_rec_from_loc = torch.cat([r_pos.unsqueeze(-2), positions], dim=-2)
+                    t_min = min(joint_pos_rec_from_loc.shape[1], joint_pos_clean.shape[1])
+                    joint_pos_rec_from_loc = joint_pos_rec_from_loc[:, :t_min]
+                    joint_pos_clean_loc = joint_pos_clean[:, :t_min]
                     joint_vel_rec_from_loc = joint_pos_rec_from_loc[:, 1:] - joint_pos_rec_from_loc[:, 0:-1]
+                    joint_vel_clean_loc = joint_pos_clean_loc[:, 1:] - joint_pos_clean_loc[:, 0:-1]
                     
-                    terms["joint_pos_global_from_loc"] = self.mse_loss(joint_pos_rec_from_loc, joint_pos_clean).mean()
-                    terms['joint_vel_global_from_loc'] = self.mse_loss(joint_vel_rec_from_loc, joint_vel_clean).mean()
+                    terms["joint_pos_global_from_loc"] = self.mse_loss(joint_pos_rec_from_loc, joint_pos_clean_loc).mean()
+                    if joint_vel_rec_from_loc.shape[1] > 0 and joint_vel_clean_loc.shape[1] > 0:
+                        terms['joint_vel_global_from_loc'] = self.mse_loss(joint_vel_rec_from_loc, joint_vel_clean_loc).mean()
+                    else:
+                        terms['joint_vel_global_from_loc'] = torch.zeros((), device=joint_pos_rec_from_loc.device)
 
                 if 'glo' in self.data_rep:
                     joint_pos_rec_from_glo = sample[:,:,self.glo_dim_start: self.glo_dim_end]
                     joint_pos_rec_from_glo = joint_pos_rec_from_glo.view(joint_pos_rec_from_glo.shape[:-1] + (-1, 3))
+                    t_min = min(joint_pos_rec_from_glo.shape[1], joint_pos_clean.shape[1])
+                    joint_pos_rec_from_glo = joint_pos_rec_from_glo[:, :t_min]
+                    joint_pos_clean_glo = joint_pos_clean[:, :t_min]
                     joint_vel_rec_from_glo = joint_pos_rec_from_glo[:, 1:] - joint_pos_rec_from_glo[:, 0:-1]
+                    joint_vel_clean_glo = joint_pos_clean_glo[:, 1:] - joint_pos_clean_glo[:, 0:-1]
                     
-                    terms["joint_pos_global_from_glo"] = self.mse_loss(joint_pos_rec_from_glo, joint_pos_clean).mean()
-                    terms['joint_vel_global_from_glo'] = self.mse_loss(joint_vel_rec_from_glo, joint_vel_clean).mean()
+                    terms["joint_pos_global_from_glo"] = self.mse_loss(joint_pos_rec_from_glo, joint_pos_clean_glo).mean()
+                    if joint_vel_rec_from_glo.shape[1] > 0 and joint_vel_clean_glo.shape[1] > 0:
+                        terms['joint_vel_global_from_glo'] = self.mse_loss(joint_vel_rec_from_glo, joint_vel_clean_glo).mean()
+                    else:
+                        terms['joint_vel_global_from_glo'] = torch.zeros((), device=joint_pos_rec_from_glo.device)
 
             if self.logging_keyframe_mse:
                 # Compute the loss over the keyframes for logging
